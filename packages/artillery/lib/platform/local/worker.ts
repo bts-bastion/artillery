@@ -36,6 +36,7 @@ import { loadPlugins, loadPluginsConfig } from '../../load-plugins.ts';
 const { loadProcessor } = core.runner.runnerFuncs;
 
 import prepareTestExecutionPlan from '../../util/prepare-test-execution-plan.ts';
+import { setWorkerOrdinalEnv } from './worker-ordinal.ts';
 
 process.env.LOCAL_WORKER_ID = String(threadId);
 
@@ -139,6 +140,12 @@ async function prepare(opts) {
   } else {
     _script = opts.script;
   }
+
+  // Publish this worker's ordinal before the processor is loaded, so that it is
+  // available to processor code both at module scope and while running
+  // scenarios. `__phases` are the divided phases for this worker; `_script` has
+  // them already unless the script was reloaded from TypeScript above.
+  setWorkerOrdinalEnv(opts.script.__phases ?? _script.config?.phases);
 
   const { payload, options } = opts;
   const script = await loadProcessor(_script, options);

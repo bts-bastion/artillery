@@ -1,0 +1,12 @@
+config:
+  target: "http://localhost:3003"
+  processor: "./worker-ordinal-processor.js"
+  # arrivalRate must be >= the number of worker threads, otherwise dist.ts
+  # leaves some of them idle and filters them out of the run
+  phases:
+    - duration: 2
+      arrivalRate: 20
+scenarios:
+  - name: "Record worker ordinal"
+    flow:
+      - function: "recordWorkerOrdinal"

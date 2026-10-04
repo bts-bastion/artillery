@@ -55,9 +55,14 @@ test('idle workers are excluded, keeping the remaining ordinals dense', () => {
   ]);
 });
 
-test('ARTILLERY_WORKER_BASE offsets the local ordinal for distributed runs', () => {
+test('an ordinal already in the environment is not overwritten', () => {
+  // set by a cloud control plane (e.g. the Lambda event ENV): every nested
+  // local worker inside that node shares the node's ordinal
   const workerScripts = divideWork(scriptWithArrivalRate(30), 3);
-  const env = { ARTILLERY_WORKER_BASE: '6', ARTILLERY_WORKER_COUNT: '12' };
+  const env = {
+    ARTILLERY_WORKER_INDEX: '5',
+    ARTILLERY_WORKER_COUNT: '12'
+  };
 
   const observed = workerScripts.map((s) =>
     workerOrdinalEnv(s.config.phases, env)
@@ -65,24 +70,44 @@ test('ARTILLERY_WORKER_BASE offsets the local ordinal for distributed runs', () 
 
   assert.deepStrictEqual(
     observed.map((e) => e.ARTILLERY_WORKER_INDEX),
-    ['6', '7', '8'],
-    'local ordinal is added to the base offset'
+    ['5', '5', '5'],
+    'every nested worker keeps the node ordinal'
   );
   assert.deepStrictEqual(
     observed.map((e) => e.ARTILLERY_WORKER_COUNT),
     ['12', '12', '12'],
-    'a launcher-provided global count is preserved, not derived from phases'
+    'and the fleet size, not the local thread count'
   );
 });
 
-test('a non-numeric ARTILLERY_WORKER_BASE is treated as no offset', () => {
-  const env = { ARTILLERY_WORKER_BASE: 'not-a-number' };
-  const phases = [{ duration: 10, arrivalRate: 1, worker: 2, totalWorkers: 4 }];
+test('an ordinal already in the environment applies to unannotated scripts too', () => {
+  // --solo on a distributed platform: one worker per node
+  const phases = [{ duration: 10, arrivalRate: 1 }];
+  const env = { ARTILLERY_WORKER_INDEX: '3', ARTILLERY_WORKER_COUNT: '5' };
 
   assert.deepStrictEqual(workerOrdinalEnv(phases, env), {
-    ARTILLERY_WORKER_INDEX: '1',
-    ARTILLERY_WORKER_COUNT: '4'
+    ARTILLERY_WORKER_INDEX: '3',
+    ARTILLERY_WORKER_COUNT: '5'
   });
+});
+
+test('an index of 0 in the environment is still honoured', () => {
+  const phases = [{ duration: 10, arrivalRate: 1, worker: 2, totalWorkers: 4 }];
+  const env = { ARTILLERY_WORKER_INDEX: '0', ARTILLERY_WORKER_COUNT: '8' };
+
+  assert.deepStrictEqual(workerOrdinalEnv(phases, env), {
+    ARTILLERY_WORKER_INDEX: '0',
+    ARTILLERY_WORKER_COUNT: '8'
+  });
+});
+
+test('a partial ordinal in the environment is ignored in favour of the phases', () => {
+  const phases = [{ duration: 10, arrivalRate: 1, worker: 2, totalWorkers: 4 }];
+
+  assert.deepStrictEqual(
+    workerOrdinalEnv(phases, { ARTILLERY_WORKER_COUNT: '8' }),
+    { ARTILLERY_WORKER_INDEX: '1', ARTILLERY_WORKER_COUNT: '4' }
+  );
 });
 
 test('a script without phases defaults to the single-worker identity', () => {
@@ -107,18 +132,6 @@ test('phases without worker annotations default to the single-worker identity', 
   });
 });
 
-test('an unannotated script still honours a launcher-provided base and count', () => {
-  // --solo on a distributed platform: one worker per node, so the node's base
-  // offset alone identifies it
-  const phases = [{ duration: 10, arrivalRate: 1 }];
-  const env = { ARTILLERY_WORKER_BASE: '3', ARTILLERY_WORKER_COUNT: '5' };
-
-  assert.deepStrictEqual(workerOrdinalEnv(phases, env), {
-    ARTILLERY_WORKER_INDEX: '3',
-    ARTILLERY_WORKER_COUNT: '5'
-  });
-});
-
 test('setWorkerOrdinalEnv writes the ordinal onto the given env object', () => {
   const env = { PATH: '/usr/bin' };
   const phases = [{ duration: 10, arrivalRate: 1, worker: 3, totalWorkers: 7 }];
@@ -128,4 +141,14 @@ test('setWorkerOrdinalEnv writes the ordinal onto the given env object', () => {
   assert.strictEqual(env.ARTILLERY_WORKER_INDEX, '2');
   assert.strictEqual(env.ARTILLERY_WORKER_COUNT, '7');
   assert.strictEqual(env.PATH, '/usr/bin', 'unrelated env is left alone');
+});
+
+test('setWorkerOrdinalEnv leaves a control-plane ordinal in place', () => {
+  const env = { ARTILLERY_WORKER_INDEX: '2', ARTILLERY_WORKER_COUNT: '9' };
+  const phases = [{ duration: 10, arrivalRate: 1, worker: 1, totalWorkers: 3 }];
+
+  setWorkerOrdinalEnv(phases, env);
+
+  assert.strictEqual(env.ARTILLERY_WORKER_INDEX, '2');
+  assert.strictEqual(env.ARTILLERY_WORKER_COUNT, '9');
 });
